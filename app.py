@@ -2,7 +2,7 @@ import base64
 import os
 from flask import Flask, request
 from google.cloud import aiplatform
-from vertexai.generative_models import GenerativeModel, GenerationConfig
+from vertexai.generative_models import GenerativeModel
 
 app = Flask(__name__)
 
@@ -36,12 +36,7 @@ def generate_image():
     try:
         model = GenerativeModel("imagen-3.0-generate-002")
 
-        generation_config = GenerationConfig(number_of_images=1)
-
-        response = model.generate_content(
-            [prompt],
-            generation_config=generation_config
-        )
+        response = model.generate_content([prompt])
 
         # Extract image bytes from the first candidate
         image_bytes = response.candidates[0].content.parts[0].image._image_bytes
