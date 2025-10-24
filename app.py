@@ -2,7 +2,7 @@ import base64
 import os
 from flask import Flask, request, jsonify
 from google.cloud import aiplatform
-from vertexai.preview.vision_models import ImageGenerationModel
+from vertexai.generative_models import GenerativeModel, GenerationConfig
 
 app = Flask(__name__)
 
@@ -151,16 +151,18 @@ def generate_image():
         return jsonify({'error': 'Please provide a prompt.'}), 400
 
     try:
-        model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-002")
+        model = GenerativeModel("imagen-3.0-generate-002")
 
-        response = model.generate_images(
-            prompt=prompt,
-            number_of_images=image_count
+        generation_config = GenerationConfig(number_of_images=image_count)
+
+        response = model.generate_content(
+            [prompt],
+            generation_config=generation_config
         )
 
         images_b64 = []
-        for image in response:
-            image_bytes = image._image_bytes
+        for candidate in response.candidates:
+            image_bytes = candidate.content.parts[0].image._image_bytes
             encoded_image = base64.b64encode(image_bytes).decode('utf-8')
             images_b64.append(encoded_image)
 
