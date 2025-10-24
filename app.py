@@ -1,10 +1,12 @@
 import base64
 import os
+import logging
 from flask import Flask, request, jsonify
 from google.cloud import aiplatform
 from vertexai.preview.vision_models import ImageGenerationModel
 
 app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # Initialize Vertex AI
 aiplatform.init(project=os.environ.get('GCP_PROJECT'), location=os.environ.get('GCP_REGION'))
@@ -44,7 +46,7 @@ def index():
                 flex-direction: column;
                 gap: 15px;
             }
-            input[type="text"], select {
+            input, select {
                 padding: 10px;
                 border: 1px solid #555;
                 background-color: #555;
@@ -105,7 +107,7 @@ def index():
     <body>
         <div class="container">
             <h2>Generate Image (Imagen 3.0)</h2>
-            <form id="generate-form">
+            <form id="generate-form" enctype="multipart/form-data">
                 <label for="prompt" style="text-align: left;">Enter a descriptive prompt:</label>
                 <input type="text" id="prompt" name="prompt" required placeholder="A cyberpunk cat on a neon rooftop...">
 
@@ -124,15 +126,15 @@ def index():
                     <option value="3:4">3:4</option>
                 </select>
 
+                <div id="media-upload-area">
+                    <label for="upload_file" style="text-align: left;">Upload Media (for editing):</label>
+                    <input type="file" id="upload_file" name="upload_file">
+                </div>
+
                 <button type="submit">Generate Image</button>
             </form>
             <div id="loading">Loading...</div>
             <div id="results-container"></div>
-
-            <div id="media-upload-area">
-                <p>Media Upload (for future editing features)</p>
-                <button id="upload-btn">Upload Media</button>
-            </div>
         </div>
 
         <script>
@@ -140,11 +142,7 @@ def index():
                 $('#generate-form').on('submit', function(e) {
                     e.preventDefault();
 
-                    var formData = {
-                        'prompt': $('#prompt').val(),
-                        'image_count': $('#image_count').val(),
-                        'aspect_ratio': $('#aspect_ratio').val()
-                    };
+                    var formData = new FormData(this);
 
                     $('body').css('filter', 'blur(5px)');
                     $('#loading').show();
@@ -154,7 +152,8 @@ def index():
                         type: 'POST',
                         url: '/generate-image',
                         data: formData,
-                        dataType: 'json',
+                        processData: false,
+                        contentType: false,
                         success: function(data) {
                             $('body').css('filter', 'none');
                             $('#loading').hide();
@@ -176,10 +175,14 @@ def index():
                                 });
                             }
                         },
-                        error: function() {
+                        error: function(jqXHR, textStatus, errorThrown) {
                             $('body').css('filter', 'none');
                             $('#loading').hide();
-                            $('#results-container').html('<p>An unexpected error occurred.</p>');
+                            var errorMsg = 'An unexpected error occurred.';
+                            if (jqXHR.responseJSON && jqXHR.responseJSON.error) {
+                                errorMsg = 'Error: ' + jqXHR.responseJSON.error;
+                            }
+                            $('#results-container').html('<p>' + errorMsg + '</p>');
                         }
                     });
                 });
@@ -191,6 +194,10 @@ def index():
 
 @app.route('/generate-image', methods=['POST'])
 def generate_image():
+    if 'upload_file' in request.files and request.files['upload_file'].filename != '':
+        logging.info("Received user image for editing.")
+        return jsonify({'error': 'Image editing is not yet fully implemented for this version. Please use the text prompt only.'}), 400
+
     prompt = request.form.get('prompt')
     try:
         image_count = int(request.form.get('image_count', 1))
