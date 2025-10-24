@@ -2,7 +2,7 @@ import base64
 import os
 from flask import Flask, request, jsonify
 from google.cloud import aiplatform
-from vertexai.generative_models import GenerativeModel, GenerationConfig
+from vertexai.preview.vision_models import ImageGenerationModel
 
 app = Flask(__name__)
 
@@ -21,20 +21,22 @@ def index():
         <style>
             body {
                 font-family: Arial, sans-serif;
-                background-color: #f0f0f0;
+                background-color: #333;
+                color: #fff;
                 display: flex;
                 flex-direction: column;
                 align-items: center;
                 padding-top: 50px;
                 margin: 0;
+                transition: filter 0.3s ease-in-out;
             }
             .container {
-                background-color: white;
+                background-color: #444;
                 padding: 30px;
                 border-radius: 8px;
-                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
                 width: 90%;
-                max-width: 500px;
+                max-width: 600px;
                 text-align: center;
             }
             form {
@@ -44,13 +46,15 @@ def index():
             }
             input[type="text"], select {
                 padding: 10px;
-                border: 1px solid #ccc;
+                border: 1px solid #555;
+                background-color: #555;
+                color: #fff;
                 border-radius: 4px;
                 font-size: 16px;
             }
             button {
-                padding: 10px;
-                background-color: #4CAF50; /* Green */
+                padding: 12px;
+                background-color: #007BFF;
                 color: white;
                 border: none;
                 border-radius: 4px;
@@ -59,7 +63,7 @@ def index():
                 transition: background-color 0.3s;
             }
             button:hover {
-                background-color: #45a049;
+                background-color: #0056b3;
             }
             #loading {
                 display: none;
@@ -69,13 +73,32 @@ def index():
                 margin-top: 20px;
                 display: flex;
                 flex-wrap: wrap;
-                gap: 10px;
+                gap: 15px;
                 justify-content: center;
             }
-            #results-container img {
+            .result-item {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 10px;
+            }
+            .result-item img {
                 max-width: 100%;
                 border-radius: 4px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            }
+            .download-btn {
+                background-color: #28a745;
+            }
+            .download-btn:hover {
+                background-color: #218838;
+            }
+            #media-upload-area {
+                margin-top: 20px;
+                padding: 20px;
+                border: 2px dashed #555;
+                border-radius: 8px;
+                text-align: center;
             }
         </style>
     </head>
@@ -93,10 +116,23 @@ def index():
                     <option value="3">3</option>
                 </select>
 
+                <label for="aspect_ratio" style="text-align: left;">Aspect Ratio:</label>
+                <select id="aspect_ratio" name="aspect_ratio">
+                    <option value="1:1">1:1</option>
+                    <option value="16:9">16:9</option>
+                    <option value="9:16">9:16</option>
+                    <option value="3:4">3:4</option>
+                </select>
+
                 <button type="submit">Generate Image</button>
             </form>
             <div id="loading">Loading...</div>
             <div id="results-container"></div>
+
+            <div id="media-upload-area">
+                <p>Media Upload (for future editing features)</p>
+                <button id="upload-btn">Upload Media</button>
+            </div>
         </div>
 
         <script>
@@ -106,9 +142,11 @@ def index():
 
                     var formData = {
                         'prompt': $('#prompt').val(),
-                        'image_count': $('#image_count').val()
+                        'image_count': $('#image_count').val(),
+                        'aspect_ratio': $('#aspect_ratio').val()
                     };
 
+                    $('body').css('filter', 'blur(5px)');
                     $('#loading').show();
                     $('#results-container').empty();
 
@@ -118,16 +156,28 @@ def index():
                         data: formData,
                         dataType: 'json',
                         success: function(data) {
+                            $('body').css('filter', 'none');
                             $('#loading').hide();
                             if (data.error) {
                                 $('#results-container').html('<p>Error: ' + data.error + '</p>');
                             } else {
                                 $.each(data.images, function(index, base64_image) {
-                                    $('#results-container').append('<img src="data:image/png;base64,' + base64_image + '">');
+                                    var resultItem = $('<div class="result-item"></div>');
+                                    resultItem.append('<img src="data:image/png;base64,' + base64_image + '">');
+                                    var downloadBtn = $('<button class="download-btn">Download Image</button>');
+                                    downloadBtn.on('click', function() {
+                                        var a = document.createElement('a');
+                                        a.href = 'data:image/png;base64,' + base64_image;
+                                        a.download = 'generated_image_' + index + '.png';
+                                        a.click();
+                                    });
+                                    resultItem.append(downloadBtn);
+                                    $('#results-container').append(resultItem);
                                 });
                             }
                         },
                         error: function() {
+                            $('body').css('filter', 'none');
                             $('#loading').hide();
                             $('#results-container').html('<p>An unexpected error occurred.</p>');
                         }
@@ -147,22 +197,23 @@ def generate_image():
     except (ValueError, TypeError):
         image_count = 1
 
+    aspect_ratio = request.form.get('aspect_ratio', '1:1')
+
     if not prompt:
         return jsonify({'error': 'Please provide a prompt.'}), 400
 
     try:
-        model = GenerativeModel("imagen-3.0-generate-002")
+        model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-002")
 
-        generation_config = GenerationConfig(number_of_images=image_count)
-
-        response = model.generate_content(
-            [prompt],
-            generation_config=generation_config
+        response = model.generate_images(
+            prompt=prompt,
+            number_of_images=image_count,
+            aspect_ratio=aspect_ratio
         )
 
         images_b64 = []
-        for candidate in response.candidates:
-            image_bytes = candidate.content.parts[0].image._image_bytes
+        for image in response:
+            image_bytes = image._image_bytes
             encoded_image = base64.b64encode(image_bytes).decode('utf-8')
             images_b64.append(encoded_image)
 
