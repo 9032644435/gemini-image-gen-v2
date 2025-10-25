@@ -3,7 +3,7 @@ import os
 import logging
 from flask import Flask, request, jsonify
 from google.cloud import aiplatform
-from vertexai.preview.vision_models import ImageGenerationModel
+from vertexai.preview.vision_models import ImageGenerationModel, VideoGenerationModel, GenerateVideosConfig
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -17,7 +17,7 @@ def index():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Gemini Image Generation</title>
+        <title>Gemini Multimodal Generation</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
         <style>
@@ -28,7 +28,7 @@ def index():
                 display: flex;
                 flex-direction: column;
                 align-items: center;
-                padding-top: 50px;
+                padding: 50px;
                 margin: 0;
                 transition: filter 0.3s ease-in-out;
             }
@@ -40,13 +40,14 @@ def index():
                 width: 90%;
                 max-width: 600px;
                 text-align: center;
+                margin-bottom: 30px;
             }
             form {
                 display: flex;
                 flex-direction: column;
                 gap: 15px;
             }
-            input, select {
+            input, select, .button {
                 padding: 10px;
                 border: 1px solid #555;
                 background-color: #555;
@@ -54,20 +55,24 @@ def index():
                 border-radius: 4px;
                 font-size: 16px;
             }
-            button {
+            .button {
                 padding: 12px;
                 background-color: #007BFF;
                 color: white;
                 border: none;
-                border-radius: 4px;
                 cursor: pointer;
-                font-size: 16px;
                 transition: background-color 0.3s;
             }
-            button:hover {
+            .button:hover {
                 background-color: #0056b3;
             }
-            #loading {
+            .video-button {
+                background-color: #dc3545;
+            }
+            .video-button:hover {
+                background-color: #c82333;
+            }
+            #loading, #video-loading {
                 display: none;
                 margin-top: 20px;
             }
@@ -92,32 +97,26 @@ def index():
             .download-btn {
                 background-color: #28a745;
             }
-            .download-btn:hover {
-                background-color: #218838;
-            }
             #media-upload-area {
                 margin-top: 20px;
                 padding: 20px;
                 border: 2px dashed #555;
                 border-radius: 8px;
-                text-align: center;
             }
         </style>
     </head>
     <body>
         <div class="container">
             <h2>Generate Image (Imagen 3.0)</h2>
-            <form id="generate-form" enctype="multipart/form-data">
+            <form id="generate-image-form" enctype="multipart/form-data">
                 <label for="prompt" style="text-align: left;">Enter a descriptive prompt:</label>
                 <input type="text" id="prompt" name="prompt" required placeholder="A cyberpunk cat on a neon rooftop...">
-
                 <label for="image_count" style="text-align: left;">Number of images:</label>
                 <select id="image_count" name="image_count">
                     <option value="1">1</option>
                     <option value="2">2</option>
                     <option value="3">3</option>
                 </select>
-
                 <label for="aspect_ratio" style="text-align: left;">Aspect Ratio:</label>
                 <select id="aspect_ratio" name="aspect_ratio">
                     <option value="1:1">1:1</option>
@@ -125,25 +124,38 @@ def index():
                     <option value="9:16">9:16</option>
                     <option value="3:4">3:4</option>
                 </select>
-
                 <div id="media-upload-area">
                     <label for="upload_file" style="text-align: left;">Upload Media (for editing):</label>
                     <input type="file" id="upload_file" name="upload_file">
                 </div>
-
-                <button type="submit">Generate Image</button>
+                <button type="submit" class="button">Generate Image</button>
             </form>
             <div id="loading">Loading...</div>
             <div id="results-container"></div>
         </div>
 
+        <div class="container">
+            <h2>Video Generation (Veo 3.1)</h2>
+            <form id="generate-video-form">
+                <label for="video_prompt" style="text-align: left;">Video Prompt:</label>
+                <input type="text" id="video_prompt" name="video_prompt" required>
+                <label for="video_aspect_ratio" style="text-align: left;">Aspect Ratio:</label>
+                <select id="video_aspect_ratio" name="video_aspect_ratio">
+                    <option value="16:9">16:9</option>
+                    <option value="9:16">9:16</option>
+                </select>
+                <label for="video_duration" style="text-align: left;">Duration (seconds):</label>
+                <input type="number" id="video_duration" name="video_duration" min="1" max="8" value="4">
+                <button type="submit" class="button video-button">Generate Video</button>
+            </form>
+            <div id="video-loading">Operation Started. Video generation is in progress...</div>
+        </div>
+
         <script>
             $(document).ready(function() {
-                $('#generate-form').on('submit', function(e) {
+                $('#generate-image-form').on('submit', function(e) {
                     e.preventDefault();
-
                     var formData = new FormData(this);
-
                     $('body').css('filter', 'blur(5px)');
                     $('#loading').show();
                     $('#results-container').empty();
@@ -152,40 +164,66 @@ def index():
                         type: 'POST',
                         url: '/generate-image',
                         data: formData,
-                        processData: false,
-                        contentType: false,
+                        processData: false, contentType: false,
                         success: function(data) {
-                            $('body').css('filter', 'none');
-                            $('#loading').hide();
-                            if (data.error) {
-                                $('#results-container').html('<p>Error: ' + data.error + '</p>');
-                            } else {
-                                $.each(data.images, function(index, base64_image) {
-                                    var resultItem = $('<div class="result-item"></div>');
-                                    resultItem.append('<img src="data:image/png;base64,' + base64_image + '">');
-                                    var downloadBtn = $('<button class="download-btn">Download Image</button>');
-                                    downloadBtn.on('click', function() {
-                                        var a = document.createElement('a');
-                                        a.href = 'data:image/png;base64,' + base64_image;
-                                        a.download = 'generated_image_' + index + '.png';
-                                        a.click();
-                                    });
-                                    resultItem.append(downloadBtn);
-                                    $('#results-container').append(resultItem);
-                                });
-                            }
+                            handleSuccess(data);
                         },
-                        error: function(jqXHR, textStatus, errorThrown) {
-                            $('body').css('filter', 'none');
-                            $('#loading').hide();
-                            var errorMsg = 'An unexpected error occurred.';
-                            if (jqXHR.responseJSON && jqXHR.responseJSON.error) {
-                                errorMsg = 'Error: ' + jqXHR.responseJSON.error;
-                            }
-                            $('#results-container').html('<p>' + errorMsg + '</p>');
+                        error: function(jqXHR) {
+                            handleError(jqXHR);
                         }
                     });
                 });
+
+                $('#generate-video-form').on('submit', function(e) {
+                    e.preventDefault();
+                    var formData = $(this).serialize();
+                    $('#video-loading').show();
+
+                    $.ajax({
+                        type: 'POST',
+                        url: '/generate-video',
+                        data: formData,
+                        success: function(data) {
+                            // Display message but don't hide loading, as it's async
+                            $('#video-loading').text(data.message || 'Operation Started');
+                        },
+                        error: function(jqXHR) {
+                             $('#video-loading').text('Error: ' + (jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Unknown error'));
+                        }
+                    });
+                });
+
+                function handleSuccess(data) {
+                    $('body').css('filter', 'none');
+                    $('#loading').hide();
+                    if (data.error) {
+                        $('#results-container').html('<p>Error: ' + data.error + '</p>');
+                    } else {
+                        $.each(data.images, function(index, base64_image) {
+                            var resultItem = $('<div class="result-item"></div>');
+                            resultItem.append('<img src="data:image/png;base64,' + base64_image + '">');
+                            var downloadBtn = $('<button class="button download-btn">Download Image</button>');
+                            downloadBtn.on('click', function() {
+                                var a = document.createElement('a');
+                                a.href = 'data:image/png;base64,' + base64_image;
+                                a.download = 'generated_image_' + index + '.png';
+                                a.click();
+                            });
+                            resultItem.append(downloadBtn);
+                            $('#results-container').append(resultItem);
+                        });
+                    }
+                }
+
+                function handleError(jqXHR) {
+                    $('body').css('filter', 'none');
+                    $('#loading').hide();
+                    var errorMsg = 'An unexpected error occurred.';
+                    if (jqXHR.responseJSON && jqXHR.responseJSON.error) {
+                        errorMsg = 'Error: ' + jqXHR.responseJSON.error;
+                    }
+                    $('#results-container').html('<p>' + errorMsg + '</p>');
+                }
             });
         </script>
     </body>
@@ -196,37 +234,48 @@ def index():
 def generate_image():
     if 'upload_file' in request.files and request.files['upload_file'].filename != '':
         logging.info("Received user image for editing.")
-        return jsonify({'error': 'Image editing is not yet fully implemented for this version. Please use the text prompt only.'}), 400
+        return jsonify({'error': 'Image editing is not yet fully implemented.'}), 400
 
     prompt = request.form.get('prompt')
     try:
         image_count = int(request.form.get('image_count', 1))
+        aspect_ratio = request.form.get('aspect_ratio', '1:1')
     except (ValueError, TypeError):
-        image_count = 1
-
-    aspect_ratio = request.form.get('aspect_ratio', '1:1')
+        return jsonify({'error': 'Invalid form data.'}), 400
 
     if not prompt:
         return jsonify({'error': 'Please provide a prompt.'}), 400
 
     try:
         model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-002")
-
-        response = model.generate_images(
-            prompt=prompt,
-            number_of_images=image_count,
-            aspect_ratio=aspect_ratio
-        )
-
-        images_b64 = []
-        for image in response:
-            image_bytes = image._image_bytes
-            encoded_image = base64.b64encode(image_bytes).decode('utf-8')
-            images_b64.append(encoded_image)
-
+        response = model.generate_images(prompt=prompt, number_of_images=image_count, aspect_ratio=aspect_ratio)
+        images_b64 = [base64.b64encode(img._image_bytes).decode('utf-8') for img in response]
         return jsonify({'images': images_b64})
-
     except Exception as e:
+        logging.error(f"Image generation failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/generate-video', methods=['POST'])
+def generate_video():
+    prompt = request.form.get('video_prompt')
+    try:
+        duration = int(request.form.get('video_duration', 4))
+        aspect_ratio = request.form.get('video_aspect_ratio', '16:9')
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Invalid form data.'}), 400
+
+    if not prompt:
+        return jsonify({'error': 'Please provide a video prompt.'}), 400
+
+    try:
+        model = VideoGenerationModel.from_pretrained("veo-3.1-generate-preview")
+        config = GenerateVideosConfig(aspect_ratio=aspect_ratio, generation_length_secs=duration)
+        # This is an async call in the SDK, so we don't block
+        model.generate_videos(prompt=prompt, config=config)
+        logging.info(f"Video generation started for prompt: {prompt}")
+        return jsonify({'message': 'Operation Started. Video generation is processing asynchronously.'})
+    except Exception as e:
+        logging.error(f"Video generation failed to start: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
