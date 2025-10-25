@@ -3,7 +3,7 @@ import os
 import logging
 from flask import Flask, request, jsonify
 from google.cloud import aiplatform
-from vertexai.preview.vision_models import ImageGenerationModel, VideoGenerationModel, GenerateVideosConfig
+from vertexai.preview.vision_models import ImageGenerationModel
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -17,7 +17,7 @@ def index():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Gemini Multimodal Generation</title>
+        <title>Gemini Image Generation</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
         <style>
@@ -66,13 +66,7 @@ def index():
             .button:hover {
                 background-color: #0056b3;
             }
-            .video-button {
-                background-color: #dc3545;
-            }
-            .video-button:hover {
-                background-color: #c82333;
-            }
-            #loading, #video-loading {
+            #loading {
                 display: none;
                 margin-top: 20px;
             }
@@ -134,23 +128,6 @@ def index():
             <div id="results-container"></div>
         </div>
 
-        <div class="container">
-            <h2>Video Generation (Veo 3.1)</h2>
-            <form id="generate-video-form">
-                <label for="video_prompt" style="text-align: left;">Video Prompt:</label>
-                <input type="text" id="video_prompt" name="video_prompt" required>
-                <label for="video_aspect_ratio" style="text-align: left;">Aspect Ratio:</label>
-                <select id="video_aspect_ratio" name="video_aspect_ratio">
-                    <option value="16:9">16:9</option>
-                    <option value="9:16">9:16</option>
-                </select>
-                <label for="video_duration" style="text-align: left;">Duration (seconds):</label>
-                <input type="number" id="video_duration" name="video_duration" min="1" max="8" value="4">
-                <button type="submit" class="button video-button">Generate Video</button>
-            </form>
-            <div id="video-loading">Operation Started. Video generation is in progress...</div>
-        </div>
-
         <script>
             $(document).ready(function() {
                 $('#generate-image-form').on('submit', function(e) {
@@ -170,25 +147,6 @@ def index():
                         },
                         error: function(jqXHR) {
                             handleError(jqXHR);
-                        }
-                    });
-                });
-
-                $('#generate-video-form').on('submit', function(e) {
-                    e.preventDefault();
-                    var formData = $(this).serialize();
-                    $('#video-loading').show();
-
-                    $.ajax({
-                        type: 'POST',
-                        url: '/generate-video',
-                        data: formData,
-                        success: function(data) {
-                            // Display message but don't hide loading, as it's async
-                            $('#video-loading').text(data.message || 'Operation Started');
-                        },
-                        error: function(jqXHR) {
-                             $('#video-loading').text('Error: ' + (jqXHR.responseJSON ? jqXHR.responseJSON.error : 'Unknown error'));
                         }
                     });
                 });
@@ -253,29 +211,6 @@ def generate_image():
         return jsonify({'images': images_b64})
     except Exception as e:
         logging.error(f"Image generation failed: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/generate-video', methods=['POST'])
-def generate_video():
-    prompt = request.form.get('video_prompt')
-    try:
-        duration = int(request.form.get('video_duration', 4))
-        aspect_ratio = request.form.get('video_aspect_ratio', '16:9')
-    except (ValueError, TypeError):
-        return jsonify({'error': 'Invalid form data.'}), 400
-
-    if not prompt:
-        return jsonify({'error': 'Please provide a video prompt.'}), 400
-
-    try:
-        model = VideoGenerationModel.from_pretrained("veo-3.1-generate-preview")
-        config = GenerateVideosConfig(aspect_ratio=aspect_ratio, generation_length_secs=duration)
-        # This is an async call in the SDK, so we don't block
-        model.generate_videos(prompt=prompt, config=config)
-        logging.info(f"Video generation started for prompt: {prompt}")
-        return jsonify({'message': 'Operation Started. Video generation is processing asynchronously.'})
-    except Exception as e:
-        logging.error(f"Video generation failed to start: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
